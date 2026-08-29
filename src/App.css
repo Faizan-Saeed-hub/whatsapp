@@ -3770,6 +3770,100 @@
 }
 
 /* ==========================================================================
+   Install App / Add to Home Screen Modal
+   ========================================================================== */
+
+.install-app-menu-btn {
+  color: var(--wa-teal) !important;
+  font-weight: 600 !important;
+}
+
+.install-app-modal {
+  max-width: 480px;
+  padding: 22px;
+}
+
+.install-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.install-modal-logo {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
+.install-modal-title h3 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--wa-text-primary);
+}
+
+.install-modal-title span {
+  font-size: 12px;
+  color: var(--wa-teal);
+  font-weight: 600;
+}
+
+.install-modal-body {
+  margin: 14px 0 20px;
+}
+
+.install-subtitle {
+  font-size: 13.5px;
+  color: var(--wa-text-secondary);
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.install-direct-action {
+  text-align: center;
+  margin: 16px 0;
+}
+
+.install-now-btn {
+  width: 100%;
+  padding: 12px 18px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ios-install-steps, .android-install-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--wa-bg-light);
+  border: 1px solid var(--wa-border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.install-step-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 13px;
+  color: var(--wa-text-primary);
+  line-height: 1.4;
+}
+
+.step-num {
+  background-color: var(--wa-teal);
+  color: #ffffff;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
    Responsive Mobile (< 768px)
    ========================================================================== */
 

@@ -3,14 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta property="og:type" content="website">
-    <meta property="og:title" content="WhatsApp Clone React & Supabase">
-    <meta property="og:description" content="Reactjs and Supabase Whatsapp clone project">
-    <link rel="icon" type="image/png" href="/src/wp-icon.png" />
+    <meta property="og:title" content="WhatsApp Web">
+    <meta property="og:description" content="Fast, Simple, Secure Real-Time Messaging">
+    <link rel="icon" type="image/png" href="/wp-icon.png" />
+    <link rel="apple-touch-icon" href="/wp-icon.png" />
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#00a884" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="WhatsApp" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>WhatsApp Web</title>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(err => console.log('SW registration failed:', err));
+        });
+      }
+    </script>
   </body>
 </html>

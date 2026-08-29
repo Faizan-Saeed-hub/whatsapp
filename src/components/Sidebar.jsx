@@ -15,6 +15,7 @@ import { generate6DigitId, formatUserTag } from '../helpers/userIdHelper';
 import CreateGroupModal from './CreateGroupModal';
 import NewPrivateChatModal from './NewPrivateChatModal';
 import ProfileDrawer from './ProfileDrawer';
+import InstallAppModal from './InstallAppModal';
 
 const Sidebar = ({ 
     groups = [], 
@@ -44,6 +45,8 @@ const Sidebar = ({
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isPrivateModalOpen, setIsPrivateModalOpen] = useState(false);
     const [isProfileDrawerOpen, setIsProfileDrawerOpen] = useState(false);
+    const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
+    const [deferredPrompt, setDeferredPrompt] = useState(null);
     const [menuOpen, setMenuOpen] = useState(false);
     const [copiedId, setCopiedId] = useState(false);
     const [activeItemMenuId, setActiveItemMenuId] = useState(null);
@@ -54,11 +57,34 @@ const Sidebar = ({
 
     const avatarSrc = userProfile?.avatar_url || `/avatar/avatar-${userProfile?.avatar_num || getAvatarN(currentUserEmail)}.jpg`;
 
+    // Capture PWA install prompt
+    useEffect(() => {
+        const handleBeforeInstall = (e) => {
+            e.preventDefault();
+            setDeferredPrompt(e);
+        };
+        window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+        return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+    }, []);
+
     useEffect(() => {
         const handleClickOutside = () => setActiveItemMenuId(null);
         window.addEventListener('click', handleClickOutside);
         return () => window.removeEventListener('click', handleClickOutside);
     }, []);
+
+    const handleInstallClick = async () => {
+        setMenuOpen(false);
+        if (deferredPrompt) {
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            if (outcome === 'accepted') {
+                setDeferredPrompt(null);
+            }
+        } else {
+            setIsInstallModalOpen(true);
+        }
+    };
 
     const handleCopyId = () => {
         navigator.clipboard.writeText(my6DigitId);
@@ -202,6 +228,9 @@ const Sidebar = ({
                         </button>
                         {menuOpen && (
                             <div className="dropdown-menu">
+                                <button type="button" className="install-app-menu-btn" onClick={handleInstallClick}>
+                                    📲 Install App (Add to Home)
+                                </button>
                                 <button type="button" onClick={() => { setIsProfileDrawerOpen(true); setMenuOpen(false); }}>
                                     My Profile
                                 </button>
@@ -377,6 +406,14 @@ const Sidebar = ({
                 onStartDirectChat={onStartDirectChat}
                 isDemo={isDemo}
                 allKnownUsers={allKnownUsers}
+            />
+
+            {/* Install App Modal */}
+            <InstallAppModal 
+                isOpen={isInstallModalOpen}
+                onClose={() => setIsInstallModalOpen(false)}
+                onInstall={handleInstallClick}
+                isInstallable={Boolean(deferredPrompt)}
             />
         </aside>
     );
