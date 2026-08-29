@@ -1,0 +1,7 @@
+const Forward = () => (
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+        <path d="M12 8V4l8 8-8 8v-4H4V8z"/>
+    </svg>
+);
+
+export default Forward;
