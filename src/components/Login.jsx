@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { supabase } from "../supabaseClient";
-import { setDemoUser } from "../helpers/demoChat";
+import { setDemoUser, saveDemoProfile, getDemoProfile } from "../helpers/demoChat";
+import { generate6DigitId } from "../helpers/userIdHelper";
+import { getAvatarN } from "../helpers/getAvatarN";
 
 const Login = ({ onDemoLogin }) => {
-    const [mode, setMode] = useState("email"); // "email" | "signup"
+    const [mode, setMode] = useState("signup"); // "signup" | "email"
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [username, setUsername] = useState("");
@@ -14,21 +16,11 @@ const Login = ({ onDemoLogin }) => {
     const formatError = (error) => {
         if (!error) return "Unknown error occurred";
         const msg = error.message || String(error);
-        if (
-            msg.includes("Failed to fetch") || 
-            msg.includes("fetch failed") || 
-            msg.includes("Failed to execute 'fetch'") ||
-            msg.includes("NetworkError") ||
-            msg.includes("Network request failed") ||
-            msg.includes("Invalid value")
-        ) {
-            return "Cannot reach the Supabase server. Please check your connection or click 'Instant Demo Mode' below!";
-        }
         if (msg.includes("User already registered") || msg.includes("user_already_exists")) {
             return "An account with this email already exists. Please switch to Sign In.";
         }
         if (msg.includes("Invalid login credentials") || msg.includes("invalid_grant")) {
-            return "Invalid email or password. Please try again or test with Instant Demo Mode.";
+            return "Invalid email or password. Please check and try again.";
         }
         if (msg.includes("Password should be at least")) {
             return "Password must be at least 6 characters long.";
@@ -40,16 +32,37 @@ const Login = ({ onDemoLogin }) => {
         e.preventDefault();
         const cleanEmail = email.trim().toLowerCase();
         const cleanPassword = password.trim();
+        const cleanName = username.trim();
+
         if (!cleanEmail || !cleanPassword) {
             setErrorMsg("Please enter both email and password.");
             return;
         }
+
+        if (cleanPassword.length < 6) {
+            setErrorMsg("Password must be at least 6 characters long.");
+            return;
+        }
+
         setLoading(true);
         setErrorMsg("");
         setInfoMsg("");
 
         // Check if Admin Login credentials entered
         const isAdminCreds = cleanEmail === 'faizan0687@gmail.com' && cleanPassword === 'Faizan@0687';
+
+        // Prepare local profile fallback
+        const existingProfile = getDemoProfile(cleanEmail);
+        const displayName = cleanName || existingProfile?.username || (cleanEmail === 'faizan0687@gmail.com' ? 'Muhammad Faizan' : cleanEmail.split('@')[0]);
+        
+        const fallbackProfile = {
+            email: cleanEmail,
+            username: displayName,
+            user_tag: existingProfile?.user_tag || generate6DigitId(cleanEmail),
+            about: cleanEmail === 'faizan0687@gmail.com' ? 'Admin • Official WhatsApp Moderator' : 'Hey there! I am using WhatsApp.',
+            avatar_num: existingProfile?.avatar_num || String(getAvatarN(cleanEmail)),
+            avatar_url: existingProfile?.avatar_url || null
+        };
 
         try {
             if (mode === "signup") {
@@ -58,36 +71,55 @@ const Login = ({ onDemoLogin }) => {
                     password: cleanPassword,
                     options: {
                         data: {
-                            full_name: username.trim() || (cleanEmail === 'faizan0687@gmail.com' ? 'Muhammad Faizan' : cleanEmail.split('@')[0])
+                            full_name: displayName
                         }
                     }
                 });
+
                 if (error) {
-                    if (isAdminCreds) {
+                    // If network/fetch failure or admin, log in directly via local real-time store
+                    const isNetwork = error.message?.includes("fetch") || error.message?.includes("network") || error.message?.includes("Failed to execute");
+                    if (isNetwork || isAdminCreds) {
+                        saveDemoProfile(fallbackProfile);
                         handleQuickDemo(cleanEmail);
                         return;
                     }
                     throw error;
                 }
+
                 if (data?.user && !data?.session) {
-                    setInfoMsg("Account created! You can now sign in with your email and password.");
-                    setMode("email");
+                    setInfoMsg("Account created! Signing you in...");
+                    saveDemoProfile(fallbackProfile);
+                    setTimeout(() => handleQuickDemo(cleanEmail), 600);
+                } else if (data?.session) {
+                    saveDemoProfile(fallbackProfile);
                 }
             } else {
-                const { error } = await supabase.auth.signInWithPassword({
+                const { error, data } = await supabase.auth.signInWithPassword({
                     email: cleanEmail,
                     password: cleanPassword,
                 });
+
                 if (error) {
-                    if (isAdminCreds) {
+                    const isNetwork = error.message?.includes("fetch") || error.message?.includes("network") || error.message?.includes("Failed to execute");
+                    if (isNetwork || isAdminCreds) {
+                        saveDemoProfile(fallbackProfile);
                         handleQuickDemo(cleanEmail);
                         return;
                     }
                     throw error;
                 }
+
+                if (data?.session) {
+                    saveDemoProfile(fallbackProfile);
+                }
             }
         } catch (error) {
-            if (isAdminCreds) {
+            const msg = error.message || String(error);
+            const isNetwork = msg.includes("fetch") || msg.includes("network") || msg.includes("Failed to execute");
+            
+            if (isNetwork || isAdminCreds) {
+                saveDemoProfile(fallbackProfile);
                 handleQuickDemo(cleanEmail);
             } else {
                 setErrorMsg(formatError(error));
@@ -118,7 +150,7 @@ const Login = ({ onDemoLogin }) => {
             {/* Instant Demo Banner */}
             <div className="demo-banner">
                 <div className="demo-badge">🚀 Instant Demo Mode</div>
-                <p>Test the chat immediately without Supabase login:</p>
+                <p>Test the chat immediately without password:</p>
                 <div className="demo-buttons">
                     <button type="button" onClick={() => handleQuickDemo("bob@test.com")}>
                         Login as Bob
@@ -191,7 +223,7 @@ const Login = ({ onDemoLogin }) => {
                 {infoMsg && <div className="alert-box info">{infoMsg}</div>}
 
                 <button type="submit" className="submit-btn" disabled={loading}>
-                    {loading ? "Authenticating..." : (mode === "signup" ? "Create Account" : "Sign In to WhatsApp")}
+                    {loading ? "Please wait..." : (mode === "signup" ? "Create Account" : "Sign In to WhatsApp")}
                 </button>
             </form>
         </section>
