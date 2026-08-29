@@ -113,7 +113,7 @@ const Login = ({ onDemoLogin }) => {
             </div>
 
             <div className="divider">
-                <span>OR SIGN IN WITH SUPABASE / ADMIN</span>
+                <span>OR SIGN IN WITH EMAIL</span>
             </div>
 
             {/* Mode Switcher Tabs */}
@@ -141,7 +141,7 @@ const Login = ({ onDemoLogin }) => {
                         <label>Display Name (Optional)</label>
                         <input 
                             type="text" 
-                            placeholder="e.g. Muhammad Faizan" 
+                            placeholder="e.g. John Doe" 
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
                         />
@@ -152,7 +152,7 @@ const Login = ({ onDemoLogin }) => {
                     <label>Email Address</label>
                     <input 
                         type="email" 
-                        placeholder="Faizan0687@gmail.com" 
+                        placeholder="you@example.com" 
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
                         required
