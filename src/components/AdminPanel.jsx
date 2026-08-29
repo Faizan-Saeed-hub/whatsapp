@@ -1,16 +1,33 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { getDemoMessages, getDemoGroups, deleteDemoMessage, deleteDemoGroup } from '../helpers/demoChat';
+import { getDemoMessages, getDemoGroups, deleteDemoMessage, deleteDemoGroup, getAllDemoUsers, removeDemoUser } from '../helpers/demoChat';
 import Shield from './icons/Shield';
 import Search from './icons/Search';
 import Trash from './icons/Trash';
+import UserPlus from './icons/UserPlus';
 import Message from './Message';
+import { getAvatarN } from '../helpers/getAvatarN';
+import { generate6DigitId } from '../helpers/userIdHelper';
 
-const AdminPanel = ({ session, isDemo, groups = [], onSelectGroup, onDeleteGroupSuccess }) => {
+const AdminPanel = ({ 
+    session, 
+    isDemo, 
+    groups = [], 
+    onSelectGroup, 
+    onDeleteGroupSuccess,
+    onStartDirectChat,
+    allKnownUsers = [],
+    onRemoveUserSuccess
+}) => {
     const [allMessages, setAllMessages] = useState([]);
+    const [userList, setUserList] = useState([]);
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterMediaType, setFilterMediaType] = useState('all'); // 'all' | 'text' | 'image' | 'audio' | 'file'
-    const [activeTab, setActiveTab] = useState('stream'); // 'stream' | 'groups'
+    const [userSearchTerm, setUserSearchTerm] = useState('');
+    const [filterMediaType, setFilterMediaType] = useState('all'); // 'all' | 'text' | 'image' | 'video' | 'audio' | 'file'
+    const [activeTab, setActiveTab] = useState('stream'); // 'stream' | 'groups' | 'users'
+    const [expandedGroupId, setExpandedGroupId] = useState(null);
+
+    const adminEmail = 'faizan0687@gmail.com';
 
     const fetchAllMessages = async () => {
         if (isDemo) {
@@ -31,8 +48,37 @@ const AdminPanel = ({ session, isDemo, groups = [], onSelectGroup, onDeleteGroup
         }
     };
 
+    const fetchAllUsers = async () => {
+        if (isDemo) {
+            const demoUsers = getAllDemoUsers();
+            setUserList(demoUsers);
+            return;
+        }
+
+        try {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*');
+
+            if (error) {
+                console.warn("Profiles fetch fallback:", error);
+                const demoUsers = getAllDemoUsers();
+                setUserList(demoUsers);
+            } else if (data && data.length > 0) {
+                setUserList(data);
+            } else {
+                const demoUsers = getAllDemoUsers();
+                setUserList(demoUsers);
+            }
+        } catch (err) {
+            console.error("Error fetching users for admin:", err);
+            setUserList(getAllDemoUsers());
+        }
+    };
+
     useEffect(() => {
         fetchAllMessages();
+        fetchAllUsers();
 
         if (isDemo) {
             if (typeof BroadcastChannel !== 'undefined') {
@@ -42,6 +88,8 @@ const AdminPanel = ({ session, isDemo, groups = [], onSelectGroup, onDeleteGroup
                         setAllMessages(prev => [e.data.payload || e.data.message, ...prev]);
                     } else if (e.data?.type === 'DELETE_MESSAGE') {
                         setAllMessages(prev => prev.filter(m => m.id !== e.data.payload.id));
+                    } else if (e.data?.type === 'USER_REMOVED') {
+                        setUserList(prev => prev.filter(u => u.email?.toLowerCase() !== e.data.payload.email?.toLowerCase()));
                     }
                 };
                 return () => channel.close();
@@ -100,12 +148,83 @@ const AdminPanel = ({ session, isDemo, groups = [], onSelectGroup, onDeleteGroup
         }
     };
 
+    // Remove User System (Admin Only)
+    const handleRemoveUser = async (userEmail, userName) => {
+        if (!userEmail) return;
+        const cleanEmail = userEmail.toLowerCase();
+
+        if (cleanEmail === adminEmail.toLowerCase()) {
+            alert("The primary Admin account cannot be removed!");
+            return;
+        }
+
+        if (!window.confirm(`Are you sure you want to permanently remove user "${userName || userEmail}" (${userEmail}) from the entire system?`)) {
+            return;
+        }
+
+        // Remove from local and demo storage
+        removeDemoUser(cleanEmail);
+        setUserList(prev => prev.filter(u => u.email?.toLowerCase() !== cleanEmail));
+        setAllMessages(prev => prev.filter(m => m.email?.toLowerCase() !== cleanEmail));
+
+        // Remove from Supabase database
+        try {
+            await supabase.from('profiles').delete().eq('email', cleanEmail);
+            await supabase.from('messages').delete().eq('email', cleanEmail);
+        } catch (err) {
+            console.warn("Supabase user removal error:", err);
+        }
+
+        if (onRemoveUserSuccess) {
+            onRemoveUserSuccess(cleanEmail);
+        }
+
+        alert(`User ${cleanEmail} has been successfully removed.`);
+    };
+
+    // Remove member from group
+    const handleRemoveMemberFromGroup = async (groupId, memberEmail) => {
+        if (!window.confirm(`Remove ${memberEmail} from this group?`)) return;
+
+        const targetGroup = groups.find(g => String(g.id) === String(groupId));
+        if (!targetGroup) return;
+
+        const updatedMembers = Array.isArray(targetGroup.members)
+            ? targetGroup.members.filter(m => m.toLowerCase() !== memberEmail.toLowerCase())
+            : [];
+
+        try {
+            if (!isDemo) {
+                await supabase.from('groups').update({ members: updatedMembers }).eq('id', groupId);
+            }
+            targetGroup.members = updatedMembers;
+            alert(`${memberEmail} removed from group.`);
+        } catch (err) {
+            console.error("Error removing member from group:", err);
+        }
+    };
+
     // Calculate metrics
     const totalMessages = allMessages.length;
     const totalPhotos = allMessages.filter(m => m.media_type === 'image').length;
+    const totalVideos = allMessages.filter(m => m.media_type === 'video').length;
     const totalAudio = allMessages.filter(m => m.media_type === 'audio').length;
-    const totalFiles = allMessages.filter(m => m.media_type === 'file').length;
-    const uniqueUsers = Array.from(new Set(allMessages.map(m => m.email).filter(Boolean))).length;
+    const totalFiles = allMessages.filter(m => m.media_type === 'file' || m.media_type === 'pdf').length;
+    
+    // Unique registered users list
+    const combinedUsers = [...userList];
+    allMessages.forEach(m => {
+        if (m.email && !combinedUsers.some(u => u.email?.toLowerCase() === m.email.toLowerCase())) {
+            combinedUsers.push({
+                email: m.email,
+                username: m.email.split('@')[0],
+                user_tag: generate6DigitId(m.email),
+                avatar_num: String(getAvatarN(m.email))
+            });
+        }
+    });
+
+    const uniqueUsersCount = combinedUsers.length;
 
     // Filter messages for search and media type
     const filteredMessages = allMessages.filter(m => {
@@ -115,6 +234,16 @@ const AdminPanel = ({ session, isDemo, groups = [], onSelectGroup, onDeleteGroup
             (m.email && m.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
             (m.file_name && m.file_name.toLowerCase().includes(searchTerm.toLowerCase()));
         return matchesMedia && matchesSearch;
+    });
+
+    // Filter users
+    const filteredUsers = combinedUsers.filter(u => {
+        const q = userSearchTerm.toLowerCase();
+        return (
+            (u.username && u.username.toLowerCase().includes(q)) ||
+            (u.email && u.email.toLowerCase().includes(q)) ||
+            (u.user_tag && u.user_tag.toLowerCase().includes(q))
+        );
     });
 
     const getGroupName = (groupId) => {
@@ -148,6 +277,13 @@ const AdminPanel = ({ session, isDemo, groups = [], onSelectGroup, onDeleteGroup
                     >
                         Manage Groups ({groups.length})
                     </button>
+                    <button 
+                        type="button" 
+                        className={`tab ${activeTab === 'users' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('users')}
+                    >
+                        Manage Users ({uniqueUsersCount})
+                    </button>
                 </div>
             </div>
 
@@ -162,11 +298,11 @@ const AdminPanel = ({ session, isDemo, groups = [], onSelectGroup, onDeleteGroup
                     <span className="stat-label">Total Messages</span>
                 </div>
                 <div className="stat-card">
-                    <span className="stat-num">{uniqueUsers}</span>
+                    <span className="stat-num">{uniqueUsersCount}</span>
                     <span className="stat-label">Active Users</span>
                 </div>
                 <div className="stat-card highlight">
-                    <span className="stat-num">{totalPhotos} 📸 / {totalAudio} 🎙️ / {totalFiles} 📎</span>
+                    <span className="stat-num">{totalPhotos} 📸 / {totalVideos} 🎬 / {totalAudio} 🎙️ / {totalFiles} 📄</span>
                     <span className="stat-label">Media Shared</span>
                 </div>
             </div>
@@ -186,7 +322,7 @@ const AdminPanel = ({ session, isDemo, groups = [], onSelectGroup, onDeleteGroup
                         </div>
 
                         <div className="media-filter-buttons">
-                            {['all', 'text', 'image', 'audio', 'file'].map(type => (
+                            {['all', 'text', 'image', 'video', 'audio', 'file'].map(type => (
                                 <button 
                                     key={type}
                                     type="button"
@@ -241,6 +377,75 @@ const AdminPanel = ({ session, isDemo, groups = [], onSelectGroup, onDeleteGroup
                 </div>
             )}
 
+            {/* Manage Users Tab */}
+            {activeTab === 'users' && (
+                <div className="admin-users-container">
+                    <div className="admin-filters-bar">
+                        <div className="search-input-box">
+                            <Search />
+                            <input 
+                                type="text" 
+                                placeholder="Search user by name, email, or 6-digit ID..."
+                                value={userSearchTerm}
+                                onChange={e => setUserSearchTerm(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    <div className="admin-users-grid">
+                        {filteredUsers.map(u => {
+                            const isFaizanAdmin = u.email?.toLowerCase() === adminEmail.toLowerCase();
+                            const userMsgCount = allMessages.filter(m => m.email?.toLowerCase() === u.email?.toLowerCase()).length;
+                            const avatar = u.avatar_url || `/avatar/avatar-${u.avatar_num || getAvatarN(u.email)}.jpg`;
+
+                            return (
+                                <div key={u.email} className={`admin-user-card ${isFaizanAdmin ? 'is-admin-card' : ''}`}>
+                                    <div className="user-card-header">
+                                        <img src={avatar} alt={u.username} className="user-card-avatar" />
+                                        <div className="user-card-info">
+                                            <div className="user-card-name-row">
+                                                <h4>{u.username || u.email?.split('@')[0]}</h4>
+                                                {isFaizanAdmin ? (
+                                                    <span className="badge-admin">👑 Admin</span>
+                                                ) : (
+                                                    <span className="badge-member">👤 Member</span>
+                                                )}
+                                            </div>
+                                            <span className="user-card-email">{u.email}</span>
+                                            <span className="user-card-tag">ID: <strong>#{u.user_tag || generate6DigitId(u.email)}</strong></span>
+                                        </div>
+                                    </div>
+
+                                    <div className="user-card-stats">
+                                        <span>💬 {userMsgCount} messages sent</span>
+                                    </div>
+
+                                    <div className="user-card-actions">
+                                        <button 
+                                            type="button" 
+                                            className="btn-user-chat"
+                                            onClick={() => onStartDirectChat && onStartDirectChat(u.email, u.user_tag || generate6DigitId(u.email))}
+                                        >
+                                            💬 Message
+                                        </button>
+                                        {!isFaizanAdmin && (
+                                            <button 
+                                                type="button" 
+                                                className="btn-user-remove"
+                                                onClick={() => handleRemoveUser(u.email, u.username)}
+                                                title="Remove this user completely"
+                                            >
+                                                <Trash /> Remove User
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
             {/* Manage Groups View */}
             {activeTab === 'groups' && (
                 <div className="admin-groups-table-container">
@@ -250,40 +455,79 @@ const AdminPanel = ({ session, isDemo, groups = [], onSelectGroup, onDeleteGroup
                                 <th>Group Name</th>
                                 <th>Description</th>
                                 <th>Created By</th>
-                                <th>Created Date</th>
+                                <th>Members</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {groups.map(group => (
-                                <tr key={group.id}>
-                                    <td>
-                                        <strong>{group.name}</strong>
-                                    </td>
-                                    <td>{group.description || '—'}</td>
-                                    <td>{group.created_by}</td>
-                                    <td>{new Date(group.created_at).toLocaleString()}</td>
-                                    <td>
-                                        <div className="table-actions">
-                                            <button 
-                                                type="button" 
-                                                className="btn-open-group"
-                                                onClick={() => onSelectGroup(group)}
-                                            >
-                                                Open Chat
-                                            </button>
-                                            <button 
-                                                type="button" 
-                                                className="btn-delete-group"
-                                                onClick={() => handleDeleteGroup(group.id)}
-                                                title="Delete Group"
-                                            >
-                                                <Trash />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
+                            {groups.map(group => {
+                                const members = Array.isArray(group.members) ? group.members : [];
+                                const isExpanded = expandedGroupId === group.id;
+
+                                return (
+                                    <tr key={group.id}>
+                                        <td>
+                                            <strong>{group.name}</strong>
+                                        </td>
+                                        <td>{group.description || '—'}</td>
+                                        <td>{group.created_by}</td>
+                                        <td>
+                                            <div className="group-members-summary">
+                                                <span>{members.length} members</span>
+                                                <button 
+                                                    type="button" 
+                                                    className="btn-view-members"
+                                                    onClick={() => setExpandedGroupId(isExpanded ? null : group.id)}
+                                                >
+                                                    {isExpanded ? 'Hide' : 'View'}
+                                                </button>
+                                            </div>
+                                            {isExpanded && (
+                                                <div className="group-members-list-popup">
+                                                    {members.length === 0 ? (
+                                                        <small>No members listed</small>
+                                                    ) : (
+                                                        members.map(m => (
+                                                            <div key={m} className="member-item-row">
+                                                                <span>{m}</span>
+                                                                {m.toLowerCase() !== adminEmail.toLowerCase() && (
+                                                                    <button 
+                                                                        type="button" 
+                                                                        className="btn-kick-member"
+                                                                        onClick={() => handleRemoveMemberFromGroup(group.id, m)}
+                                                                        title="Remove from group"
+                                                                    >
+                                                                        Remove
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td>
+                                            <div className="table-actions">
+                                                <button 
+                                                    type="button" 
+                                                    className="btn-open-group"
+                                                    onClick={() => onSelectGroup(group)}
+                                                >
+                                                    Open Chat
+                                                </button>
+                                                <button 
+                                                    type="button" 
+                                                    className="btn-delete-group"
+                                                    onClick={() => handleDeleteGroup(group.id)}
+                                                    title="Delete Group"
+                                                >
+                                                    <Trash />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
                         </tbody>
                     </table>
                 </div>

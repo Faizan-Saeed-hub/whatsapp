@@ -3864,6 +3864,232 @@
 }
 
 /* ==========================================================================
+   Admin Users Management Tab Styles
+   ========================================================================== */
+
+.admin-users-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.admin-users-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.admin-user-card {
+  background: var(--wa-bg-panel);
+  border: 1px solid var(--wa-border);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-user-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.admin-user-card.is-admin-card {
+  border-color: #f59e0b;
+  background: linear-gradient(180deg, rgba(245, 158, 11, 0.05), var(--wa-bg-panel));
+}
+
+.user-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-card-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 2px solid var(--wa-border);
+}
+
+.user-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.user-card-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-card-name-row h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--wa-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge-admin {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.badge-member {
+  background: rgba(0, 168, 132, 0.15);
+  color: var(--wa-teal);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.user-card-email {
+  font-size: 12px;
+  color: var(--wa-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.user-card-tag {
+  font-size: 11.5px;
+  color: var(--wa-text-muted);
+}
+
+.user-card-tag strong {
+  color: var(--wa-teal);
+}
+
+.user-card-stats {
+  font-size: 12px;
+  color: var(--wa-text-secondary);
+  background: var(--wa-bg-light);
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.user-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.btn-user-chat {
+  flex: 1;
+  background: var(--wa-teal);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.btn-user-chat:hover {
+  background: var(--wa-teal-hover);
+}
+
+.btn-user-remove {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 6px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-user-remove svg {
+  width: 14px;
+  height: 14px;
+}
+
+.btn-user-remove:hover {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+/* Group Members View in Admin */
+.group-members-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-view-members {
+  background: var(--wa-bg-light);
+  border: 1px solid var(--wa-border);
+  color: var(--wa-teal);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.group-members-list-popup {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--wa-bg-light);
+  border: 1px solid var(--wa-border);
+  border-radius: 6px;
+  padding: 8px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.member-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--wa-text-primary);
+}
+
+.btn-kick-member {
+  background: transparent;
+  color: #ef4444;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.btn-kick-member:hover {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+/* ==========================================================================
    Responsive Mobile (< 768px)
    ========================================================================== */
 

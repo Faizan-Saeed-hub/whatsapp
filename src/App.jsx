@@ -682,8 +682,20 @@ function App() {
               session={activeSession}
               isDemo={isDemo}
               groups={groups}
-              onSelectGroup={handleSelectGroup}
+              onSelectGroup={(grp) => {
+                setShowAdminView(false);
+                handleSelectGroup(grp);
+              }}
               onDeleteGroupSuccess={handleDeleteGroupSuccess}
+              onStartDirectChat={(email, tag) => {
+                setShowAdminView(false);
+                handleStartDirectChat(email, tag);
+              }}
+              allKnownUsers={allKnownUsers}
+              onRemoveUserSuccess={(removedEmail) => {
+                setAllKnownUsers(prev => prev.filter(u => u.toLowerCase() !== removedEmail.toLowerCase()));
+                setGroups(prev => prev.filter(g => !(g.is_direct && (g.participant1?.toLowerCase() === removedEmail.toLowerCase() || g.participant2?.toLowerCase() === removedEmail.toLowerCase()))));
+              }}
             />
           ) : (
             <Messages 

@@ -91,6 +91,57 @@ export const saveDemoProfile = (profile) => {
     }
 };
 
+export const getAllDemoUsers = () => {
+    const users = [];
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith(DEMO_PROFILE_KEY)) {
+                const raw = localStorage.getItem(key);
+                if (raw) {
+                    try {
+                        users.push(JSON.parse(raw));
+                    } catch (e) {}
+                }
+            }
+        }
+    } catch (e) {
+        console.error("Error reading all demo users", e);
+    }
+    // Also include default demo users
+    const defaults = ["alice@test.com", "bob@test.com", "faizan0687@gmail.com"];
+    defaults.forEach(em => {
+        if (!users.some(u => u.email?.toLowerCase() === em.toLowerCase())) {
+            users.push(getDemoProfile(em));
+        }
+    });
+    return users;
+};
+
+export const removeDemoUser = (userEmail) => {
+    if (!userEmail) return;
+    const clean = userEmail.toLowerCase();
+    try {
+        localStorage.removeItem(`${DEMO_PROFILE_KEY}_${clean}`);
+        // Remove user from groups
+        const groups = getDemoGroups();
+        const updatedGroups = groups.map(g => ({
+            ...g,
+            members: Array.isArray(g.members) ? g.members.filter(m => m.toLowerCase() !== clean) : []
+        })).filter(g => !(g.is_direct && (g.participant1?.toLowerCase() === clean || g.participant2?.toLowerCase() === clean)));
+        localStorage.setItem(DEMO_GROUPS_KEY, JSON.stringify(updatedGroups));
+        
+        // Remove user messages
+        const messages = getDemoMessages();
+        const updatedMessages = messages.filter(m => m.email?.toLowerCase() !== clean);
+        localStorage.setItem(DEMO_STORAGE_KEY, JSON.stringify(updatedMessages));
+
+        broadcastEvent('USER_REMOVED', { email: clean });
+    } catch (e) {
+        console.error("Error removing demo user", e);
+    }
+};
+
 export const getDemoGroups = () => {
     try {
         const data = localStorage.getItem(DEMO_GROUPS_KEY);
