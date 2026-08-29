@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import Send from "./icons/Send";
 import Mic from "./icons/Mic";
-import PaperClip from "./icons/PaperClip";
+import Paperclip from "./icons/Paperclip";
 import Image from "./icons/Image";
 import FileText from "./icons/FileText";
 import VideoIcon from "./icons/VideoIcon";
@@ -380,7 +380,7 @@ const SendMessage = ({
                             onClick={() => { setIsMenuOpen(!isMenuOpen); setIsEmojiOpen(false); }}
                             title="Attach Photo, Video, or Document"
                         >
-                            <PaperClip />
+                            <Paperclip />
                         </button>
 
                         {isMenuOpen && (
