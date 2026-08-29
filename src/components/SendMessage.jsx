@@ -10,6 +10,7 @@ import Smiley from "./icons/Smiley";
 import EmojiPicker from "./EmojiPicker";
 import { supabase } from "../supabaseClient";
 import { sendDemoMessage } from "../helpers/demoChat";
+import { uploadToCloudinary } from "../helpers/cloudinaryUpload";
 
 const MAX_VIDEO_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB limit
 
@@ -24,63 +25,57 @@ const SendMessage = ({
     onTyping = null
 }) => {
     const [message, setMessage] = useState("");
-    const [attachedFile, setAttachedFile] = useState(null);
+    const [attachedFile, setAttachedFile] = useState(null); // { type, name, dataUrl, size, rawFile, uploadPromise }
     const [previewUrl, setPreviewUrl] = useState(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
     const [isEmojiOpen, setIsEmojiOpen] = useState(false);
     const [isRecording, setIsRecording] = useState(false);
     const [recordingTime, setRecordingTime] = useState(0);
+    const [isUploading, setIsUploading] = useState(false);
 
+    const email = session?.user?.email || "anonymous";
     const fileInputRef = useRef(null);
     const videoInputRef = useRef(null);
     const docInputRef = useRef(null);
+    const inputRef = useRef(null);
     const mediaRecorderRef = useRef(null);
     const audioChunksRef = useRef([]);
     const timerIntervalRef = useRef(null);
-    const inputRef = useRef(null);
+    const typingTimeoutRef = useRef(null);
 
-    const email = session?.user?.email || "user@demo.com";
-
-    useEffect(() => {
-        const handleGlobalClick = () => {
-            setIsEmojiOpen(false);
-            setIsMenuOpen(false);
-        };
-        window.addEventListener('click', handleGlobalClick);
-        return () => window.removeEventListener('click', handleGlobalClick);
-    }, []);
-
-    // Clipboard Paste Listener (Ctrl + V)
-    const handlePaste = (e) => {
-        const clipboardItems = e.clipboardData?.items;
-        if (!clipboardItems) return;
-
-        for (let i = 0; i < clipboardItems.length; i++) {
-            const item = clipboardItems[i];
-            if (item.type.indexOf("image") !== -1) {
-                const blob = item.getAsFile();
-                if (blob) {
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                        setAttachedFile({
-                            type: 'image',
-                            name: `pasted_image_${Date.now()}.png`,
-                            dataUrl: reader.result,
-                            size: formatFileSize(blob.size),
-                            rawFile: blob
-                        });
-                        setPreviewUrl(reader.result);
-                    };
-                    reader.readAsDataURL(blob);
-                }
-                break;
-            }
+    // Broadcast live typing status
+    const handleInputChange = (e) => {
+        setMessage(e.target.value);
+        if (onTyping) {
+            onTyping();
         }
     };
 
-    const handleInputChange = (e) => {
-        setMessage(e.target.value);
-        if (onTyping) onTyping();
+    // Close popups on click outside
+    useEffect(() => {
+        const handleDocClick = () => {
+            setIsMenuOpen(false);
+            setIsEmojiOpen(false);
+        };
+        window.addEventListener('click', handleDocClick);
+        return () => window.removeEventListener('click', handleDocClick);
+    }, []);
+
+    // Clipboard paste image / screenshot handler (Ctrl+V)
+    const handlePaste = (e) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf("image") !== -1) {
+                const file = items[i].getAsFile();
+                if (file) {
+                    e.preventDefault();
+                    processSelectedFile(file, 'image');
+                    break;
+                }
+            }
+        }
     };
 
     const handleEmojiSelect = (emoji) => {
@@ -88,6 +83,26 @@ const SendMessage = ({
         if (inputRef.current) {
             inputRef.current.focus();
         }
+    };
+
+    const processSelectedFile = (file, type) => {
+        const isPdf = file.type === 'application/pdf' || file.name?.toLowerCase().endsWith('.pdf');
+        const mediaType = isPdf ? 'pdf' : type;
+
+        // Create quick local blob preview
+        const localPreview = (type === 'image' || type === 'video') ? URL.createObjectURL(file) : null;
+        setPreviewUrl(localPreview);
+
+        const uploadPromise = uploadToCloudinary(file, mediaType);
+
+        setAttachedFile({
+            type: mediaType,
+            name: file.name || (type === 'video' ? 'video.mp4' : 'photo.jpg'),
+            dataUrl: localPreview,
+            size: formatFileSize(file.size),
+            rawFile: file,
+            uploadPromise
+        });
     };
 
     const handleFileSelect = (e, type) => {
@@ -102,20 +117,7 @@ const SendMessage = ({
         }
 
         setIsMenuOpen(false);
-
-        const reader = new FileReader();
-        reader.onload = () => {
-            const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-            setAttachedFile({
-                type: isPdf ? 'pdf' : type,
-                name: file.name,
-                dataUrl: reader.result,
-                size: formatFileSize(file.size),
-                rawFile: file
-            });
-            setPreviewUrl(type === 'image' || type === 'video' ? reader.result : null);
-        };
-        reader.readAsDataURL(file);
+        processSelectedFile(file, type);
     };
 
     const formatFileSize = (bytes) => {
@@ -148,12 +150,19 @@ const SendMessage = ({
 
             mediaRecorderRef.current.onstop = async () => {
                 const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-                const reader = new FileReader();
-                reader.onload = () => {
-                    sendVoiceMessage(reader.result);
-                };
-                reader.readAsDataURL(audioBlob);
-                stream.getTracks().forEach(track => track.stop());
+                setIsUploading(true);
+                try {
+                    const uploaded = await uploadToCloudinary(audioBlob, 'audio');
+                    sendVoiceMessage(uploaded?.url || URL.createObjectURL(audioBlob));
+                } catch (err) {
+                    console.warn("Audio upload failed, using blob fallback:", err);
+                    const reader = new FileReader();
+                    reader.onload = () => sendVoiceMessage(reader.result);
+                    reader.readAsDataURL(audioBlob);
+                } finally {
+                    setIsUploading(false);
+                    stream.getTracks().forEach(track => track.stop());
+                }
             };
 
             mediaRecorderRef.current.start();
@@ -232,7 +241,7 @@ const SendMessage = ({
     const sendMessage = async (e) => {
         e.preventDefault();
 
-        if (!message.trim() && !attachedFile) return;
+        if ((!message.trim() && !attachedFile) || isUploading) return;
 
         const currentText = message.trim();
         const currentAttachment = attachedFile;
@@ -243,14 +252,35 @@ const SendMessage = ({
         setPreviewUrl(null);
         if (onCancelReply) onCancelReply();
 
+        // Resolve final Cloudinary URL
+        let finalMediaUrl = currentAttachment?.dataUrl || null;
+        let finalSize = currentAttachment?.size || null;
+        let finalFileName = currentAttachment?.name || null;
+
+        if (currentAttachment?.uploadPromise) {
+            try {
+                setIsUploading(true);
+                const uploadResult = await currentAttachment.uploadPromise;
+                if (uploadResult?.url) {
+                    finalMediaUrl = uploadResult.url;
+                    finalSize = uploadResult.sizeFormatted || finalSize;
+                    finalFileName = uploadResult.fileName || finalFileName;
+                }
+            } catch (err) {
+                console.warn("Upload resolution failed, using fallback:", err);
+            } finally {
+                setIsUploading(false);
+            }
+        }
+
         const messagePayload = {
             group_id: activeGroupId,
             email,
             content: currentText,
             media_type: currentAttachment ? currentAttachment.type : 'text',
-            media_url: currentAttachment ? currentAttachment.dataUrl : null,
-            file_name: currentAttachment ? currentAttachment.name : null,
-            file_size: currentAttachment ? currentAttachment.size : null,
+            media_url: finalMediaUrl,
+            file_name: finalFileName,
+            file_size: finalSize,
             reply_to: currentReply ? { ...currentReply } : null,
             reactions: {},
             seen_by: [email.toLowerCase()],
@@ -267,11 +297,11 @@ const SendMessage = ({
         try {
             const { data, error } = await supabase.from('messages').insert([messagePayload]).select();
             if (error) {
-                // Fallback insertion without extended columns if schema isn't updated yet
+                // Fallback insertion
                 const fallbackPayload = {
                     group_id: activeGroupId,
                     email,
-                    content: currentText || (currentAttachment ? `[${currentAttachment.type}] ${currentAttachment.name}` : ''),
+                    content: currentText || (currentAttachment ? `[${currentAttachment.type}] ${finalFileName}` : ''),
                     created_at: new Date().toISOString()
                 };
                 const { data: fbData } = await supabase.from('messages').insert([fallbackPayload]).select();

@@ -6,6 +6,8 @@ import Copy from './icons/Copy';
 import Camera from './icons/Camera';
 import { formatUserTag } from '../helpers/userIdHelper';
 
+import { uploadToCloudinary } from '../helpers/cloudinaryUpload';
+
 const ProfileDrawer = ({ 
     isOpen, 
     onClose, 
@@ -67,21 +69,27 @@ const ProfileDrawer = ({
         }
     };
 
-    const handleUploadCustomAvatar = (e) => {
+    const handleUploadCustomAvatar = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-            setCustomAvatar(reader.result);
-            setShowAvatarPicker(false);
-            const updated = { ...profile, avatar_url: reader.result };
-            if (onUpdateProfile) {
-                await onUpdateProfile(updated);
+        try {
+            setSaving(true);
+            const res = await uploadToCloudinary(file, 'image');
+            if (res?.url) {
+                setCustomAvatar(res.url);
+                setShowAvatarPicker(false);
+                const updated = { ...profile, avatar_url: res.url };
+                if (onUpdateProfile) {
+                    await onUpdateProfile(updated);
+                }
             }
-        };
-        reader.readAsDataURL(file);
-        e.target.value = '';
+        } catch (err) {
+            console.error("Avatar upload failed:", err);
+        } finally {
+            setSaving(false);
+            e.target.value = '';
+        }
     };
 
     return (
