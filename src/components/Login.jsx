@@ -14,8 +14,24 @@ const Login = ({ onDemoLogin }) => {
     const formatError = (error) => {
         if (!error) return "Unknown error occurred";
         const msg = error.message || String(error);
-        if (msg.includes("Failed to fetch") || msg.includes("fetch failed")) {
-            return "Cannot reach the Supabase server. Please click 'Instant Demo Mode' below!";
+        if (
+            msg.includes("Failed to fetch") || 
+            msg.includes("fetch failed") || 
+            msg.includes("Failed to execute 'fetch'") ||
+            msg.includes("NetworkError") ||
+            msg.includes("Network request failed") ||
+            msg.includes("Invalid value")
+        ) {
+            return "Cannot reach the Supabase server. Please check your connection or click 'Instant Demo Mode' below!";
+        }
+        if (msg.includes("User already registered") || msg.includes("user_already_exists")) {
+            return "An account with this email already exists. Please switch to Sign In.";
+        }
+        if (msg.includes("Invalid login credentials") || msg.includes("invalid_grant")) {
+            return "Invalid email or password. Please try again or test with Instant Demo Mode.";
+        }
+        if (msg.includes("Password should be at least")) {
+            return "Password must be at least 6 characters long.";
         }
         return msg;
     };
@@ -23,7 +39,8 @@ const Login = ({ onDemoLogin }) => {
     const handleEmailAuth = async (e) => {
         e.preventDefault();
         const cleanEmail = email.trim().toLowerCase();
-        if (!cleanEmail || !password) {
+        const cleanPassword = password.trim();
+        if (!cleanEmail || !cleanPassword) {
             setErrorMsg("Please enter both email and password.");
             return;
         }
@@ -32,16 +49,16 @@ const Login = ({ onDemoLogin }) => {
         setInfoMsg("");
 
         // Check if Admin Login credentials entered
-        const isAdminCreds = cleanEmail === 'faizan0687@gmail.com' && password === 'Faizan@0687';
+        const isAdminCreds = cleanEmail === 'faizan0687@gmail.com' && cleanPassword === 'Faizan@0687';
 
         try {
             if (mode === "signup") {
                 const { error, data } = await supabase.auth.signUp({
                     email: cleanEmail,
-                    password,
+                    password: cleanPassword,
                     options: {
                         data: {
-                            full_name: username || (cleanEmail === 'faizan0687@gmail.com' ? 'Muhammad Faizan' : cleanEmail.split('@')[0])
+                            full_name: username.trim() || (cleanEmail === 'faizan0687@gmail.com' ? 'Muhammad Faizan' : cleanEmail.split('@')[0])
                         }
                     }
                 });
@@ -59,7 +76,7 @@ const Login = ({ onDemoLogin }) => {
             } else {
                 const { error } = await supabase.auth.signInWithPassword({
                     email: cleanEmail,
-                    password,
+                    password: cleanPassword,
                 });
                 if (error) {
                     if (isAdminCreds) {

@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Arrow from './icons/Arrow';
 import Edit from './icons/Edit';
 import Check from './icons/Check';
@@ -24,6 +24,15 @@ const ProfileDrawer = ({
     const [showAvatarPicker, setShowAvatarPicker] = useState(false);
     const [copied, setCopied] = useState(false);
     const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        if (profile) {
+            setName(profile.username || '');
+            setAbout(profile.about || 'Hey there! I am using WhatsApp.');
+            setAvatarNum(profile.avatar_num || '0');
+            setCustomAvatar(profile.avatar_url || null);
+        }
+    }, [profile]);
 
     const fileInputRef = useRef(null);
 
