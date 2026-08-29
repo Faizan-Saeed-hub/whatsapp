@@ -9,6 +9,7 @@ import { getDemoUser, setDemoUser, getDemoGroups, createOrGetDirectChat, sendDem
 import { generate6DigitId } from './helpers/userIdHelper';
 import { getAvatarN } from './helpers/getAvatarN';
 import { soundHelper } from './helpers/soundHelper';
+import { initRealtimeChannel, broadcastGlobalEvent } from './helpers/realtimeChannel';
 
 const STRICT_ADMIN_EMAIL = 'faizan0687@gmail.com';
 
@@ -273,68 +274,13 @@ function App() {
     }
   }, [session, demoUser, isDemo]);
 
-  // 4. Realtime listener for incoming messages, typing, profile DP updates
+  // 4. Realtime listener for incoming messages, typing, profile DP updates across ALL devices (Mobile <-> PC)
   useEffect(() => {
-    if (isDemo) {
-      if (typeof BroadcastChannel !== 'undefined') {
-        const channel = new BroadcastChannel('wp_demo_channel');
-        channel.onmessage = (e) => {
-          if (e.data?.type === 'NEW_MESSAGE') {
-            const newMsg = e.data.payload || e.data.message;
-            const fromOther = newMsg.email?.toLowerCase() !== activeUserEmail?.toLowerCase();
-            
-            if (fromOther) {
-              soundHelper.playIncomingChime();
-              const currentActiveId = activeGroupRef.current?.id;
-              if (String(currentActiveId) !== String(newMsg.group_id)) {
-                setUnreadCounts(prev => ({
-                  ...prev,
-                  [newMsg.group_id]: (prev[newMsg.group_id] || 0) + 1
-                }));
-              }
-            }
-          } else if (e.data?.type === 'USER_TYPING') {
-            const { groupId, email } = e.data.payload;
-            if (email?.toLowerCase() !== activeUserEmail?.toLowerCase()) {
-              handleIncomingTyping(groupId, email.split('@')[0]);
-            }
-          } else if (e.data?.type === 'NEW_GROUP') {
-            setGroups(prev => {
-              if (prev.some(g => g.id === e.data.payload.id)) return prev;
-              return [...prev, e.data.payload];
-            });
-          } else if (e.data?.type === 'GROUP_UPDATED') {
-            setGroups(prev => prev.map(g => g.id === e.data.payload.id ? e.data.payload : g));
-            if (activeGroupRef.current?.id === e.data.payload.id) {
-              setActiveGroup(e.data.payload);
-            }
-          } else if (e.data?.type === 'DELETE_GROUP') {
-            setGroups(prev => prev.filter(g => g.id !== e.data.payload.id));
-            if (activeGroupRef.current?.id === e.data.payload.id) {
-              setActiveGroup(null);
-            }
-          } else if (e.data?.type === 'PROFILE_UPDATED') {
-            const updatedP = e.data.payload;
-            setUserProfilesMap(prev => ({
-              ...prev,
-              [updatedP.email?.toLowerCase()]: updatedP
-            }));
-            if (updatedP.email?.toLowerCase() === activeUserEmail?.toLowerCase()) {
-              setUserProfile(updatedP);
-            }
-          }
-        };
-        return () => channel.close();
-      }
-      return;
-    }
-
-    const msgChannel = supabase
-      .channel('global-notifications-master-v3')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
-        const newMsg = payload.new;
+    const unsubscribe = initRealtimeChannel(({ type, payload }) => {
+      if (type === 'NEW_MESSAGE') {
+        const newMsg = payload;
         const fromOther = newMsg.email?.toLowerCase() !== activeUserEmail?.toLowerCase();
-
+        
         if (fromOther) {
           soundHelper.playIncomingChime();
           const currentActiveId = activeGroupRef.current?.id;
@@ -345,43 +291,40 @@ function App() {
             }));
           }
         }
-      })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'groups' }, (payload) => {
-        setGroups(prev => {
-          if (prev.some(g => g.id === payload.new.id)) return prev;
-          return [...prev, payload.new];
-        });
-      })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'groups' }, (payload) => {
-        setGroups(prev => prev.map(g => g.id === payload.new.id ? payload.new : g));
-        if (activeGroupRef.current?.id === payload.new.id) {
-          setActiveGroup(payload.new);
+      } else if (type === 'USER_TYPING') {
+        const { groupId, email } = payload;
+        if (email?.toLowerCase() !== activeUserEmail?.toLowerCase()) {
+          handleIncomingTyping(groupId, email.split('@')[0]);
         }
-      })
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'groups' }, (payload) => {
-        setGroups(prev => prev.filter(g => g.id !== payload.old.id));
-        if (activeGroupRef.current?.id === payload.old.id) {
+      } else if (type === 'NEW_GROUP') {
+        setGroups(prev => {
+          if (prev.some(g => g.id === payload.id)) return prev;
+          return [...prev, payload];
+        });
+      } else if (type === 'GROUP_UPDATED') {
+        setGroups(prev => prev.map(g => g.id === payload.id ? payload : g));
+        if (activeGroupRef.current?.id === payload.id) {
+          setActiveGroup(payload);
+        }
+      } else if (type === 'DELETE_GROUP') {
+        setGroups(prev => prev.filter(g => g.id !== payload.id));
+        if (activeGroupRef.current?.id === payload.id) {
           setActiveGroup(null);
         }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, (payload) => {
-        if (payload.new) {
-          const updated = payload.new;
-          setUserProfilesMap(prev => ({
-            ...prev,
-            [updated.email?.toLowerCase()]: updated
-          }));
-          if (updated.email?.toLowerCase() === activeUserEmail?.toLowerCase()) {
-            setUserProfile(updated);
-          }
+      } else if (type === 'PROFILE_UPDATED') {
+        const updatedP = payload;
+        setUserProfilesMap(prev => ({
+          ...prev,
+          [updatedP.email?.toLowerCase()]: updatedP
+        }));
+        if (updatedP.email?.toLowerCase() === activeUserEmail?.toLowerCase()) {
+          setUserProfile(updatedP);
         }
-      })
-      .subscribe();
+      }
+    });
 
-    return () => {
-      supabase.removeChannel(msgChannel);
-    };
-  }, [isDemo, activeUserEmail]);
+    return () => unsubscribe();
+  }, [activeUserEmail]);
 
   const handleIncomingTyping = (groupId, userName) => {
     setTypingGroupMap(prev => ({

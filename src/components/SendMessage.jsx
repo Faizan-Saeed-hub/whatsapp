@@ -11,6 +11,7 @@ import EmojiPicker from "./EmojiPicker";
 import { supabase } from "../supabaseClient";
 import { sendDemoMessage } from "../helpers/demoChat";
 import { uploadToCloudinary } from "../helpers/cloudinaryUpload";
+import { broadcastGlobalEvent } from "../helpers/realtimeChannel";
 
 const MAX_VIDEO_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB limit
 
@@ -204,6 +205,7 @@ const SendMessage = ({
 
     const sendVoiceMessage = async (audioDataUrl) => {
         const payload = {
+            id: Date.now(),
             group_id: activeGroupId,
             email,
             content: "",
@@ -220,21 +222,21 @@ const SendMessage = ({
 
         if (replyTo && onCancelReply) onCancelReply();
 
-        if (isDemo) {
-            const saved = sendDemoMessage(payload);
-            if (onNewLocalMessage) onNewLocalMessage(saved);
-            return;
-        }
+        // 1. Broadcast immediately to all connected devices across internet (Mobile <-> PC)
+        broadcastGlobalEvent('NEW_MESSAGE', payload);
 
+        // 2. Save locally for instant UI update
+        const saved = sendDemoMessage(payload);
+        if (onNewLocalMessage) onNewLocalMessage(saved);
+
+        // 3. Persist to Supabase database
         try {
-            const { data, error } = await supabase.from('messages').insert([payload]).select();
-            if (error) throw error;
+            const { data } = await supabase.from('messages').insert([payload]).select();
             if (data && data[0] && onNewLocalMessage) {
                 onNewLocalMessage(data[0]);
             }
         } catch (err) {
-            console.error("Voice note send error:", err);
-            if (onNewLocalMessage) onNewLocalMessage({ id: Date.now(), ...payload });
+            console.warn("Voice note cloud sync note:", err.message);
         }
     };
 
@@ -274,6 +276,7 @@ const SendMessage = ({
         }
 
         const messagePayload = {
+            id: Date.now(),
             group_id: activeGroupId,
             email,
             content: currentText,
@@ -288,16 +291,17 @@ const SendMessage = ({
             created_at: new Date().toISOString()
         };
 
-        if (isDemo) {
-            const saved = sendDemoMessage(messagePayload);
-            if (onNewLocalMessage) onNewLocalMessage(saved);
-            return;
-        }
+        // 1. Broadcast immediately to all connected devices across internet (Mobile <-> PC)
+        broadcastGlobalEvent('NEW_MESSAGE', messagePayload);
 
+        // 2. Save locally for instant UI update
+        const saved = sendDemoMessage(messagePayload);
+        if (onNewLocalMessage) onNewLocalMessage(saved);
+
+        // 3. Persist to Supabase database
         try {
             const { data, error } = await supabase.from('messages').insert([messagePayload]).select();
             if (error) {
-                // Fallback insertion
                 const fallbackPayload = {
                     group_id: activeGroupId,
                     email,
@@ -312,10 +316,7 @@ const SendMessage = ({
                 onNewLocalMessage(data[0]);
             }
         } catch (err) {
-            console.error("Error sending message:", err);
-            if (onNewLocalMessage) {
-                onNewLocalMessage({ id: Date.now(), ...messagePayload });
-            }
+            console.warn("Message cloud sync note:", err.message);
         }
     };
 

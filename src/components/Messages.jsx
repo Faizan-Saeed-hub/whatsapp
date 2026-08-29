@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import { getDemoMessages, deleteDemoMessage } from '../helpers/demoChat';
+import { initRealtimeChannel, broadcastGlobalEvent } from '../helpers/realtimeChannel';
 import Message from './Message';
 import SendMessage from './SendMessage';
 import Header from './Header';
@@ -111,26 +112,10 @@ const Messages = ({
 
         if (unreadFromOthers.length === 0) return;
 
-        if (supabaseChannelRef.current) {
-            supabaseChannelRef.current.send({
-                type: 'broadcast',
-                event: 'MESSAGES_SEEN',
-                payload: { groupId: activeGroupId, seenBy: myEmail, seenAt: nowIso }
-            });
-        }
+        // 1. Broadcast seen status immediately to all devices (Mobile <-> PC)
+        broadcastGlobalEvent('MESSAGES_SEEN', { groupId: activeGroupId, seenBy: myEmail, seenAt: nowIso });
 
-        if (isDemo) {
-            if (typeof BroadcastChannel !== 'undefined') {
-                const bc = new BroadcastChannel('wp_demo_channel');
-                bc.postMessage({
-                    type: 'MESSAGES_SEEN',
-                    payload: { groupId: activeGroupId, seenBy: myEmail, seenAt: nowIso }
-                });
-                bc.close();
-            }
-            return;
-        }
-
+        // 2. Persist to database
         try {
             for (const m of unreadFromOthers) {
                 const updatedSeen = [...(m.seen_by || []), myEmail];
@@ -152,126 +137,47 @@ const Messages = ({
         setIsSearchOpen(false);
     }, [activeGroupId, isDemo]);
 
-    // 3. Realtime Subscriptions
+    // 3. Universal Cross-Device Realtime Subscriptions (Mobile <-> PC)
     useEffect(() => {
-        if (isDemo) {
-            if (typeof BroadcastChannel !== 'undefined') {
-                const channel = new BroadcastChannel('wp_demo_channel');
-                channel.onmessage = (e) => {
-                    if (e.data?.type === 'NEW_MESSAGE') {
-                        const newMsg = e.data.payload || e.data.message;
-                        if (String(newMsg.group_id) === String(activeGroupId)) {
-                            setMessages(prev => {
-                                if (prev.some(m => String(m.id) === String(newMsg.id))) return prev;
-                                return [...prev, newMsg];
-                            });
-                            markMessagesAsSeen([newMsg]);
-                        }
-                    } else if (e.data?.type === 'DELETE_MESSAGE') {
-                        const targetId = e.data.payload.id;
-                        setMessages(prev => prev.map(m => String(m.id) === String(targetId) ? {
-                            ...m,
-                            content: '🚫 This message was deleted',
-                            is_deleted: true,
-                            media_url: null,
-                            media_type: 'text'
-                        } : m));
-                    } else if (e.data?.type === 'UPDATE_MESSAGE') {
-                        const updatedMsg = e.data.payload;
-                        setMessages(prev => prev.map(m => String(m.id) === String(updatedMsg.id) ? { ...m, ...updatedMsg } : m));
-                    } else if (e.data?.type === 'MESSAGES_SEEN') {
-                        if (String(e.data.payload?.groupId) === String(activeGroupId)) {
-                            const { seenBy, seenAt } = e.data.payload;
-                            setMessages(prev => prev.map(m => ({
-                                ...m,
-                                seen_by: Array.from(new Set([...(m.seen_by || []), seenBy])),
-                                seen_at: seenAt || m.seen_at
-                            })));
-                        }
-                    }
-                };
-                return () => channel.close();
-            }
-            return;
-        }
-
-        const channel = supabase
-            .channel(`group-realtime-room-${activeGroupId}`, {
-                config: { broadcast: { self: false } }
-            })
-            .on('broadcast', { event: 'REACTION_UPDATED' }, ({ payload }) => {
-                setMessages(prev => prev.map(m => String(m.id) === String(payload.msgId) ? {
-                    ...m,
-                    reactions: payload.reactions
-                } : m));
-            })
-            .on('broadcast', { event: 'MESSAGE_DELETED' }, ({ payload }) => {
-                setMessages(prev => prev.map(m => String(m.id) === String(payload.msgId) ? {
+        const unsubscribe = initRealtimeChannel(({ type, payload }) => {
+            if (type === 'NEW_MESSAGE') {
+                const newMsg = payload;
+                if (String(newMsg.group_id) === String(activeGroupId)) {
+                    setMessages(prev => {
+                        if (prev.some(m => String(m.id) === String(newMsg.id))) return prev;
+                        return [...prev, newMsg];
+                    });
+                    markMessagesAsSeen([newMsg]);
+                }
+            } else if (type === 'MESSAGE_DELETED') {
+                const targetId = payload.msgId || payload.id;
+                setMessages(prev => prev.map(m => String(m.id) === String(targetId) ? {
                     ...m,
                     content: '🚫 This message was deleted',
                     is_deleted: true,
                     media_url: null,
                     media_type: 'text'
                 } : m));
-            })
-            .on('broadcast', { event: 'NEW_MESSAGE' }, ({ payload }) => {
-                if (String(payload.group_id) === String(activeGroupId)) {
-                    setMessages(prev => {
-                        if (prev.some(m => String(m.id) === String(payload.id))) return prev;
-                        return [...prev, payload];
-                    });
-                    markMessagesAsSeen([payload]);
-                }
-            })
-            .on('broadcast', { event: 'MESSAGES_SEEN' }, ({ payload }) => {
-                if (String(payload.groupId) === String(activeGroupId)) {
+            } else if (type === 'REACTION_UPDATED') {
+                const { msgId, reactions } = payload;
+                setMessages(prev => prev.map(m => String(m.id) === String(msgId) ? {
+                    ...m,
+                    reactions
+                } : m));
+            } else if (type === 'MESSAGES_SEEN') {
+                if (String(payload?.groupId) === String(activeGroupId)) {
+                    const { seenBy, seenAt } = payload;
                     setMessages(prev => prev.map(m => ({
                         ...m,
-                        seen_by: Array.from(new Set([...(m.seen_by || []), payload.seenBy])),
-                        seen_at: payload.seenAt || m.seen_at
+                        seen_by: Array.from(new Set([...(m.seen_by || []), seenBy])),
+                        seen_at: seenAt || m.seen_at
                     })));
                 }
-            })
-            .on(
-                'postgres_changes',
-                { event: 'INSERT', schema: 'public', table: 'messages', filter: `group_id=eq.${activeGroupId}` },
-                (payload) => {
-                    setMessages(prev => {
-                        if (prev.some(m => String(m.id) === String(payload.new.id))) return prev;
-                        return [...prev, payload.new];
-                    });
-                    markMessagesAsSeen([payload.new]);
-                }
-            )
-            .on(
-                'postgres_changes',
-                { event: 'UPDATE', schema: 'public', table: 'messages', filter: `group_id=eq.${activeGroupId}` },
-                (payload) => {
-                    setMessages(prev => prev.map(m => String(m.id) === String(payload.new.id) ? { ...m, ...payload.new } : m));
-                }
-            )
-            .on(
-                'postgres_changes',
-                { event: 'DELETE', schema: 'public', table: 'messages' },
-                (payload) => {
-                    setMessages(prev => prev.map(m => String(m.id) === String(payload.old.id) ? {
-                        ...m,
-                        content: '🚫 This message was deleted',
-                        is_deleted: true,
-                        media_url: null,
-                        media_type: 'text'
-                    } : m));
-                }
-            )
-            .subscribe();
+            }
+        });
 
-        supabaseChannelRef.current = channel;
-
-        return () => {
-            supabase.removeChannel(channel);
-            supabaseChannelRef.current = null;
-        };
-    }, [activeGroupId, isDemo, currentUserEmail]);
+        return () => unsubscribe();
+    }, [activeGroupId]);
 
     useEffect(() => {
         if (scroll.current && !searchQuery) {
@@ -280,14 +186,10 @@ const Messages = ({
     }, [messages]);
 
     const handleNewLocalMessage = (newMessage) => {
-        setMessages(prev => [...prev, newMessage]);
-        if (supabaseChannelRef.current) {
-            supabaseChannelRef.current.send({
-                type: 'broadcast',
-                event: 'NEW_MESSAGE',
-                payload: newMessage
-            });
-        }
+        setMessages(prev => {
+            if (prev.some(m => String(m.id) === String(newMessage.id))) return prev;
+            return [...prev, newMessage];
+        });
     };
 
     // Reaction Toggle
@@ -310,27 +212,18 @@ const Messages = ({
 
         setMessages(prev => prev.map(m => String(m.id) === String(msgId) ? { ...m, reactions: currentReactions } : m));
 
-        if (supabaseChannelRef.current) {
-            supabaseChannelRef.current.send({
-                type: 'broadcast',
-                event: 'REACTION_UPDATED',
-                payload: { msgId, reactions: currentReactions }
-            });
-        }
+        // 1. Broadcast reaction update to all devices across internet (Mobile <-> PC)
+        broadcastGlobalEvent('REACTION_UPDATED', { msgId, reactions: currentReactions });
 
-        if (isDemo) {
-            if (typeof BroadcastChannel !== 'undefined') {
-                const bc = new BroadcastChannel('wp_demo_channel');
-                bc.postMessage({ type: 'UPDATE_MESSAGE', payload: { ...targetMsg, reactions: currentReactions } });
-                bc.close();
-            }
-            return;
-        }
+        // 2. Persist locally
+        const bcMsg = { ...targetMsg, reactions: currentReactions };
+        sendDemoMessage(bcMsg);
 
+        // 3. Persist to database
         try {
             await supabase.from('messages').update({ reactions: currentReactions }).eq('id', msgId);
         } catch (err) {
-            console.error("Error updating reactions in DB:", err);
+            console.warn("Reaction cloud sync note:", err.message);
         }
     };
 
@@ -373,21 +266,15 @@ const Messages = ({
 
         setMessages(prev => prev.map(m => String(m.id) === String(msgId) ? deletedPayload : m));
 
-        if (supabaseChannelRef.current) {
-            supabaseChannelRef.current.send({
-                type: 'broadcast',
-                event: 'MESSAGE_DELETED',
-                payload: { msgId }
-            });
-        }
+        // 1. Broadcast deletion to all devices across internet (Mobile <-> PC)
+        broadcastGlobalEvent('MESSAGE_DELETED', { msgId, id: msgId });
 
-        if (isDemo) {
-            deleteDemoMessage(msgId);
-            return;
-        }
+        // 2. Delete locally
+        deleteDemoMessage(msgId);
 
+        // 3. Delete in database
         try {
-            const { error } = await supabase
+            await supabase
                 .from('messages')
                 .update({
                     content: '🚫 This message was deleted',
@@ -398,17 +285,8 @@ const Messages = ({
                     is_deleted: true
                 })
                 .eq('id', msgId);
-
-            if (error) {
-                await supabase.from('messages').delete().eq('id', msgId);
-            }
         } catch (err) {
-            console.error("Error deleting message from Supabase:", err);
-            try {
-                await supabase.from('messages').delete().eq('id', msgId);
-            } catch (e) {
-                console.error("Fallback delete error:", e);
-            }
+            console.warn("Message deletion cloud sync note:", err.message);
         }
     };
 
